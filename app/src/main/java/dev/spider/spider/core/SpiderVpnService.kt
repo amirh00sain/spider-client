@@ -262,7 +262,7 @@ class SpiderVpnService : VpnService() {
 
         if (proxyOnly) {
             if (kind == VpnManager.KIND_XRAY) { startProxyOnly(configJson, socksPort); return }
-            if (kind in StartPlanner.PROXY_ENGINES) { startEngineProxyOnly(configJson, settings); return }
+            if (kind in StartPlanner.PROXY_ENGINES) { startEngineProxyOnly(configJson, socksPort, settings); return }
             proxyOnly = false
         }
 
@@ -703,7 +703,7 @@ class SpiderVpnService : VpnService() {
         return getString(R.string.core_start_failed_reason, raw.take(240))
     }
 
-    private fun startEngineProxyOnly(configJson: String, settings: AppSettings) {
+    private fun startEngineProxyOnly(configJson: String, socksPort: Int, settings: AppSettings) {
         killSwitchEnabled = false
         VpnManager.setActiveKind(kind)
         val dns = kind == VpnManager.KIND_DNS_TUNNEL || kind == VpnManager.KIND_MASTERDNS
