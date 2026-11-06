@@ -23,6 +23,10 @@ export GOBIN PATH="$GOBIN:$PATH" SPIDER_ROOT="$ROOT"
 go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260908204917-8b95e45f8d3e
 go install golang.org/x/mobile/cmd/gobind@v0.0.0-20260908204917-8b95e45f8d3e
 "$SOURCE/scripts/fetch.sh"
+NEWEST_NDK="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V | tail -1)"
+if [ -n "$NEWEST_NDK" ]; then
+  sed -i -E "s#/ndk/[0-9]+\.[0-9]+\.[0-9]+#/ndk/$NEWEST_NDK#g" "$SOURCE/scripts/build-zedcore.sh"
+fi
 (
   cd "$SOURCE/vendor/AndroidLibXrayLite"
   export GOTOOLCHAIN=go1.27.3
