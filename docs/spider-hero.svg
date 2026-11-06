@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1120" height="360" viewBox="0 0 1120 360" fill="none" role="img" aria-labelledby="title desc">
+  <title id="title">Spider</title>
+  <desc id="desc">A three-dimensional geometric spider mark above a dark network grid.</desc>
+  <defs>
+    <linearGradient id="bg" x1="80" y1="24" x2="1040" y2="350" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#111827"/>
+      <stop offset=".55" stop-color="#16152B"/>
+      <stop offset="1" stop-color="#09121E"/>
+    </linearGradient>
+    <linearGradient id="top" x1="438" y1="87" x2="579" y2="171" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#F4F7FF"/>
+      <stop offset="1" stop-color="#A9B5D2"/>
+    </linearGradient>
+    <linearGradient id="left" x1="432" y1="129" x2="495" y2="245" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#9B8CFF"/>
+      <stop offset="1" stop-color="#5844C8"/>
+    </linearGradient>
+    <linearGradient id="right" x1="564" y1="130" x2="627" y2="245" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FF637A"/>
+      <stop offset="1" stop-color="#B82F55"/>
+    </linearGradient>
+    <linearGradient id="leg" x1="390" y1="132" x2="345" y2="224" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C9D2EA"/>
+      <stop offset="1" stop-color="#6555D9"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="0" cy="0" r="1" gradientTransform="matrix(0 156 -330 0 558 150)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#5A4AE0" stop-opacity=".28"/>
+      <stop offset="1" stop-color="#5A4AE0" stop-opacity="0"/>
+    </radialGradient>
+    <pattern id="grid" width="32" height="32" patternTransform="matrix(.866 .5 -.866 .5 0 0)" patternUnits="userSpaceOnUse">
+      <path d="M32 0H0V32" stroke="#AAB4D4" stroke-opacity=".09"/>
+    </pattern>
+    <filter id="shadow" x="297" y="57" width="390" height="246" color-interpolation-filters="sRGB" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="18"/>
+    </filter>
+  </defs>
+  <rect width="1120" height="360" rx="28" fill="url(#bg)"/>
+  <rect width="1120" height="360" rx="28" fill="url(#grid)"/>
+  <ellipse cx="558" cy="158" fill="url(#halo)" rx="330" ry="156"/>
+  <ellipse cx="557" cy="253" fill="#050916" fill-opacity=".7" rx="132" ry="22" filter="url(#shadow)"/>
+  <g stroke="url(#leg)" stroke-linecap="round" stroke-linejoin="round" stroke-width="14">
+    <path d="m430 143-67-18-44-35M426 165l-78 2-52-25M432 190l-72 34-45 43M446 211l-48 56-18 37"/>
+    <path d="m580 143 67-18 44-35M584 165l78 2 52-25M578 190l72 34 45 43M564 211l48 56 18 37"/>
+  </g>
+  <g fill="#E4E9F6" stroke="#14172B" stroke-width="5">
+    <circle cx="319" cy="90" r="9"/><circle cx="296" cy="142" r="9"/><circle cx="315" cy="267" r="9"/><circle cx="380" cy="304" r="9"/>
+    <circle cx="701" cy="90" r="9"/><circle cx="724" cy="142" r="9"/><circle cx="705" cy="267" r="9"/><circle cx="640" cy="304" r="9"/>
+  </g>
+  <path d="m442 117 116-47 117 47-117 53-116-53Z" fill="url(#top)" stroke="#F6F7FF" stroke-opacity=".7" stroke-width="2"/>
+  <path d="M442 117v81l116 62v-90l-116-53Z" fill="url(#left)" stroke="#D7D1FF" stroke-opacity=".35" stroke-width="2"/>
+  <path d="M675 117v81l-117 62v-90l117-53Z" fill="url(#right)" stroke="#FFD0D8" stroke-opacity=".35" stroke-width="2"/>
+  <path d="m518 104 40-16 41 16-41 19-40-19Z" fill="#fff" fill-opacity=".82"/>
+  <path d="m538 142 20 10 20-10M558 152v34" stroke="#FFF" stroke-linecap="round" stroke-width="7"/>
+  <path d="m474 177 33 18v38l-33-18v-38Z" fill="#DAD6FF" fill-opacity=".28"/>
+  <path d="m641 177-33 18v38l33-18v-38Z" fill="#FFE1E6" fill-opacity=".23"/>
+  <text x="560" y="314" fill="#F5F6FF" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="27" font-weight="700" letter-spacing="8" text-anchor="middle">SPIDER</text>
+  <text x="560" y="340" fill="#A8B1C8" font-family="Inter,Segoe UI,Arial,sans-serif" font-size="11" letter-spacing="3" text-anchor="middle">TUNNEL · ROUTE · CONNECT</text>
+</svg>

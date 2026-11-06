@@ -1,0 +1,5 @@
+Firefox VPN core source
+
+Imported from https://github.com/armanlife/arman-vpn-client
+Archive revision: 2464715a1e348e94b433d297f7a22e66760d6348
+License: GNU GPL v3.0; see LICENSE.

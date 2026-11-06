@@ -1,0 +1,353 @@
+name: Spider release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Release tag to publish, for example v1.2.3; a missing tag is created from the selected run ref"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  group: spider-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      name: ${{ steps.version.outputs.name }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - name: Validate the release tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=$(sed -n 's/^spider.versionName=//p' gradle.properties)
+          tag='${{ inputs.release_tag }}'
+          [[ -z "$tag" ]] && tag="$GITHUB_REF_NAME"
+          [[ "v$version" == "$tag" ]] || { echo "::error::Tag $tag does not match spider.versionName=$version"; exit 1; }
+          echo "name=$version" >> "$GITHUB_OUTPUT"
+
+  android-apks:
+    needs: version
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "21" }
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: android-actions/setup-android@v4
+      - name: Install Android NDK
+        shell: bash
+        run: |
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "ndk;30.0.16248370"
+          echo "NDK_HOME=$ANDROID_HOME/ndk/30.0.16248370" >> "$GITHUB_ENV"
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: stable
+          targets: aarch64-linux-android,armv7-linux-androideabi,x86_64-linux-android
+      - name: Build Aether for Android
+        run: ./compile-aether.sh
+      - name: Download Android engine builds
+        run: ./tools/get-cores.sh android
+      - name: Check Android native libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            test -s "app/src/main/jniLibs/$abi/libaether.so"
+            for lib in libtor libobfs4proxy libsnowflake libconjure libsnispoof libhev-socks5-tunnel libopenconnect libzeptun-jni; do
+              [[ -s "app/src/main/jniLibs/$abi/$lib.so" ]] || echo "::warning::$abi/$lib.so is missing; that engine will be unavailable"
+            done
+            for lib in libhev-socks5-tunnel libopenconnect libzeptun-jni; do
+              so="app/src/main/jniLibs/$abi/$lib.so"
+              [[ ! -s "$so" ]] && continue
+              readelf --dyn-syms -W "$so" | grep -qE ' (JNI_OnLoad|Java_)' || { echo "::error::$abi/$lib.so has no JNI entry point"; exit 1; }
+            done
+          done
+      - name: Generate temporary APK signing key
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          keytool -genkeypair -v \
+            -keystore release.keystore \
+            -storepass android \
+            -keypass android \
+            -alias spider-release \
+            -keyalg RSA -keysize 2048 -validity 10000 \
+            -dname "CN=Spider Temporary Build, OU=CI, O=Spider, L=Unknown, ST=Unknown, C=US"
+          { echo "storeFile=release.keystore"; echo "storePassword=android"; echo "keyPassword=android"; echo "keyAlias=spider-release"; } > keystore.properties
+      - name: Build APKs (temporary signing key)
+        run: ./gradlew --warning-mode all :app:assembleRelease
+      - name: Name and verify APKs
+        env:
+          VERSION: ${{ needs.version.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          for abi in arm64-v8a armeabi-v7a x86_64; do
+            src="app/build/outputs/apk/release/app-$abi-release.apk"
+            [[ -s "$src" ]] || { echo "::error::$src was not built"; exit 1; }
+            cp "$src" "dist/Spider-$VERSION-$abi.apk"
+          done
+          bt=$(find "$ANDROID_HOME/build-tools" -mindepth 1 -maxdepth 1 -type d | sort -V | tail -1)
+          python3 tools/universal-apk.py "dist/Spider-$VERSION-arm64-v8a.apk" /tmp/universal.apk "dist/Spider-$VERSION-armeabi-v7a.apk"
+          "$bt/zipalign" -f -P 16 4 /tmp/universal.apk /tmp/universal-aligned.apk
+          store_pw=$(sed -n 's/^storePassword=//p' keystore.properties)
+          key_pw=$(sed -n 's/^keyPassword=//p' keystore.properties)
+          alias_name=$(sed -n 's/^keyAlias=//p' keystore.properties)
+          STORE_PW="$store_pw" KEY_PW="$key_pw" "$bt/apksigner" sign --ks release.keystore \
+            --ks-key-alias "$alias_name" --ks-pass env:STORE_PW --key-pass env:KEY_PW \
+            --v1-signing-enabled false --v2-signing-enabled true --v3-signing-enabled false --v4-signing-enabled false \
+            --out "dist/Spider-$VERSION-universal.apk" /tmp/universal-aligned.apk
+          rm -f /tmp/universal.apk /tmp/universal-aligned.apk
+          for apk in dist/Spider-*.apk; do "$bt/apksigner" verify "$apk"; done
+          "$bt/aapt2" dump badging "dist/Spider-$VERSION-universal.apk" | grep -q "native-code: 'arm64-v8a' 'armeabi-v7a'"
+          (cd dist && sha256sum Spider-*.apk > SHA256SUMS-android.txt)
+      - name: Remove signing material
+        if: always()
+        run: shred -u release.keystore keystore.properties 2>/dev/null || rm -f release.keystore keystore.properties
+      - uses: actions/upload-artifact@v7
+        with:
+          name: android-apks
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  linux:
+    needs: version
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.2"
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "21" }
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - name: Install packaging tools
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq rpm fakeroot file desktop-file-utils
+          curl -fsSL -o /usr/local/bin/appimagetool https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x /usr/local/bin/appimagetool
+      - name: Download Linux engine builds
+        run: ./tools/get-cores.sh linux
+      - name: Package Aether
+        run: ./tools/package-aether.sh linux-64
+      - name: Check Linux engine payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest=desktop/src/main/resources/bin/linux
+          for f in xray aether libcronet.so hev-socks5-tunnel zeddns masterdns psiphon tor/files.txt tor/tor tor/pt/lyrebird tor/bridges_default.lst; do
+            [[ -e "$dest/$f" ]] || { echo "::error::Missing $dest/$f"; exit 1; }
+          done
+      - name: Build DEB, RPM and desktop app
+        run: ./gradlew --warning-mode all :desktop:packageDeb :desktop:packageRpm :desktop:createDistributable
+      - name: Assemble Linux packages and AppImage
+        env:
+          VERSION: ${{ needs.version.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp desktop/build/compose/binaries/main/deb/*.deb "dist/Spider-$VERSION-amd64.deb"
+          cp desktop/build/compose/binaries/main/rpm/*.rpm "dist/Spider-$VERSION-x86_64.rpm"
+          app=$(find desktop/build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d | head -1)
+          [[ -n "$app" ]] || { echo "::error::Desktop app directory missing"; exit 1; }
+          tar -C "$(dirname "$app")" -czf "dist/Spider-$VERSION-linux-x86_64.tar.gz" "$(basename "$app")"
+          rm -rf AppDir && mkdir -p AppDir/usr
+          cp -a "$app/." AppDir/usr/
+          bin=$(find AppDir/usr/bin -maxdepth 1 -type f -executable | head -1)
+          [[ -n "$bin" ]] || { echo "::error::AppImage executable missing"; exit 1; }
+          cp desktop/icons/spider.png AppDir/spider.png
+          cat > AppDir/spider.desktop <<EOF
+          [Desktop Entry]
+          Type=Application
+          Name=Spider
+          Exec=$(basename "$bin")
+          Icon=spider
+          Categories=Network;
+          Terminal=false
+          EOF
+          cat > AppDir/AppRun <<EOF
+          #!/bin/sh
+          HERE=\$(dirname "\$(readlink -f "\$0")")
+          exec "\$HERE/usr/bin/$(basename "$bin")" "\$@"
+          EOF
+          chmod +x AppDir/AppRun
+          APPIMAGE_EXTRACT_AND_RUN=1 ARCH=x86_64 appimagetool --no-appstream AppDir "dist/Spider-$VERSION-x86_64.AppImage"
+          (cd dist && sha256sum Spider-* > SHA256SUMS-linux.txt)
+      - name: Verify Linux launch artifacts
+        env:
+          VERSION: ${{ needs.version.outputs.name }}
+        run: |
+          set -euo pipefail
+          appimage=$(APPIMAGE_EXTRACT_AND_RUN=1 "dist/Spider-$VERSION-x86_64.AppImage" --version)
+          [[ "$appimage" == "Spider $VERSION" ]]
+          mkdir -p /tmp/spider-tar
+          tar -xzf "dist/Spider-$VERSION-linux-x86_64.tar.gz" -C /tmp/spider-tar
+          bin=$(find /tmp/spider-tar -path '*/bin/*' -type f -perm -u+x | head -1)
+          [[ "$("$bin" --version)" == "Spider $VERSION" ]]
+      - uses: actions/upload-artifact@v7
+        with:
+          name: linux
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  windows:
+    needs: version
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.2"
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "21" }
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - name: Download Windows engine builds
+        shell: bash
+        run: ./tools/get-cores.sh windows
+      - name: Package Aether
+        shell: bash
+        run: ./tools/package-aether.sh windows-64
+      - name: Check Windows engine payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest=desktop/src/main/resources/bin/windows
+          for f in xray.exe aether.exe libcronet.dll zeptun.exe wintun.dll hev-socks5-tunnel.exe msys-2.0.dll zeddns.exe masterdns.exe psiphon.exe openconnect/files.txt tor/files.txt tor/tor.exe tor/pt/lyrebird.exe tor/bridges_default.lst; do
+            [[ -e "$dest/$f" ]] || { echo "::error::Missing $dest/$f"; exit 1; }
+          done
+      - name: Build MSI installer and portable app
+        run: .\gradlew.bat --warning-mode all :desktop:packageMsi :desktop:createDistributable
+      - name: Assemble Windows packages
+        env:
+          VERSION: ${{ needs.version.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp desktop/build/compose/binaries/main/msi/*.msi "dist/Spider-$VERSION-x86_64.msi"
+          app=$(find desktop/build/compose/binaries/main/app -mindepth 1 -maxdepth 1 -type d | head -1)
+          [[ -n "$app" ]] || { echo "::error::Desktop app directory missing"; exit 1; }
+          (cd "$(dirname "$app")" && 7z a -tzip -mx=9 "$GITHUB_WORKSPACE/dist/Spider-$VERSION-windows-x86_64.zip" "$(basename "$app")" >/dev/null)
+          (cd dist && sha256sum Spider-* > SHA256SUMS-windows.txt)
+      - uses: actions/upload-artifact@v7
+        with:
+          name: windows
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  macos:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-26, arch: arm64 }
+          - { runner: macos-26-intel, arch: x86_64 }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+      - uses: actions/setup-go@v6
+        with:
+          go-version: "1.27.2"
+      - uses: actions/setup-java@v6
+        with: { distribution: temurin, java-version: "21" }
+      - uses: gradle/actions/setup-gradle@v5
+      - uses: actions/setup-python@v6
+        with: { python-version: "3.12" }
+      - name: Download macOS engine builds
+        run: ./tools/get-cores.sh macos-${{ matrix.arch }}
+      - name: Package Aether
+        run: ./tools/package-aether.sh macos-${{ matrix.arch }}
+      - name: Check macOS engine payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          dest=desktop/src/main/resources/bin/macos
+          for f in xray aether zeptun hev-socks5-tunnel zeddns masterdns psiphon tor/files.txt tor/tor tor/pt/lyrebird tor/bridges_default.lst; do
+            [[ -e "$dest/$f" ]] || { echo "::error::Missing $dest/$f"; exit 1; }
+          done
+      - name: Build DMG
+        run: ./gradlew --warning-mode all :desktop:packageDmg
+      - name: Assemble macOS DMG
+        env:
+          VERSION: ${{ needs.version.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          cp desktop/build/compose/binaries/main/dmg/*.dmg "dist/Spider-$VERSION-macos-${{ matrix.arch }}.dmg"
+          (cd dist && shasum -a 256 Spider-* > "SHA256SUMS-macos-${{ matrix.arch }}.txt")
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-${{ matrix.arch }}
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 14
+
+  publish:
+    needs: [version, android-apks, linux, windows, macos]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: "*"
+          path: dist
+          merge-multiple: true
+      - name: Check complete release set and publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.version.outputs.name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag='${{ inputs.release_tag }}'
+          [[ -z "$tag" ]] && tag="$GITHUB_REF_NAME"
+          for f in \
+            "Spider-$VERSION-arm64-v8a.apk" "Spider-$VERSION-armeabi-v7a.apk" "Spider-$VERSION-x86_64.apk" \
+            "Spider-$VERSION-universal.apk" \
+            "Spider-$VERSION-amd64.deb" "Spider-$VERSION-x86_64.rpm" "Spider-$VERSION-linux-x86_64.tar.gz" "Spider-$VERSION-x86_64.AppImage" \
+            "Spider-$VERSION-x86_64.msi" "Spider-$VERSION-windows-x86_64.zip" \
+            "Spider-$VERSION-macos-arm64.dmg" "Spider-$VERSION-macos-x86_64.dmg"; do
+            [[ -s "dist/$f" ]] || { echo "::error::Release asset missing: $f"; exit 1; }
+          done
+          ls -lh dist
+          if gh release view "$tag" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/* --repo "$GITHUB_REPOSITORY" --clobber
+          else
+            gh release create "$tag" dist/* --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --title "Spider $VERSION" --notes "Spider $VERSION"
+          fi

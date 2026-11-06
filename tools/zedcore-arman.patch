@@ -1,0 +1,23 @@
+--- a/scripts/build-zedcore.sh
++++ b/scripts/build-zedcore.sh
+@@ -2,4 +2,5 @@
+ set -e -u -x
+ 
+ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
++SPIDER_ROOT="${SPIDER_ROOT:?SPIDER_ROOT is required}"
+ export GOTOOLCHAIN=go1.27.3
+@@ -68,2 +69,5 @@
+ echo ">>> gomobile bind (Xray + sing-box + Psiphon + DNSTT + VayDNS + MasterDNS) with $(go version)"
+ cd "$ROOT/vendor/AndroidLibXrayLite"
++go mod edit -replace "github.com/armanlife/arman-vpn-client/core=$SPIDER_ROOT/third_party/arman-vpn/core"
++go mod edit -require=github.com/armanlife/arman-vpn-client/core@v0.0.0
++for arch in arm64 arm amd64; do GOOS=android GOARCH=$arch go get github.com/armanlife/arman-vpn-client/core/mobile; done
+@@ -73,3 +77,4 @@
+   github.com/Psiphon-Labs/psiphon-tunnel-core/MobileLibrary/psi \
+   zeddns \
+-  masterdnsvpn-go/mobile
++  masterdnsvpn-go/mobile \
++  github.com/armanlife/arman-vpn-client/core/mobile
+@@ -93,1 +98,2 @@
+ printf -- '-keep class psi.** { *; }\n-keep class ca.psiphon.** { *; }\n-keep class libbox.** { *; }\n' >> "$WORK/psi/proguard.txt"
++printf -- '-keep class psi.** { *; }\n-keep class ca.psiphon.** { *; }\n-keep class libbox.** { *; }\n-keep class mobile.** { *; }\n' >> "$WORK/psi/proguard.txt"

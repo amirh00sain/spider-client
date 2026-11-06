@@ -1,0 +1,5 @@
+package dev.spider.spider.platform
+
+internal expect fun secureRandomToken(length: Int): String
+
+internal const val TOKEN_ALPHABET = "abcdefghijkmnopqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789"

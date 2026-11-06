@@ -1,0 +1,143 @@
+package dev.spider.spider.ui.theme
+
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.foundation.isSystemInDarkTheme
+import androidx.compose.material3.ColorScheme
+import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.MaterialExpressiveTheme
+import androidx.compose.material3.MotionScheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Density
+import com.materialkolor.PaletteStyle
+import com.materialkolor.dynamicColorScheme
+import com.materialkolor.dynamiccolor.ColorSpec
+import com.materialkolor.ktx.animateColorScheme
+import dev.spider.spider.domain.model.AppDesign
+import dev.spider.spider.domain.model.SpiderPrefs
+import dev.spider.spider.ui.spider.SpiderPalettes
+import dev.spider.spider.ui.spider.SpiderStyle
+import dev.spider.spider.ui.spider.LocalSpiderStyle
+import dev.spider.spider.ui.spider.spiderColorScheme
+import dev.spider.spider.domain.model.ColorContrast
+import dev.spider.spider.domain.model.ColorStyle
+
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
+@Composable
+fun SpiderTheme(
+    darkTheme: Boolean = isSystemInDarkTheme(),
+    dynamicColor: Boolean = false,
+
+    accentColor: Int = 0,
+    amoledBlack: Boolean = false,
+
+    colorStyle: ColorStyle = ColorStyle.Spider,
+    colorContrast: ColorContrast = ColorContrast.Standard,
+    animateColors: Boolean = true,
+
+    design: AppDesign = AppDesign.Spider,
+
+    spider: SpiderPrefs = SpiderPrefs(),
+
+    languageTag: String = "en",
+
+    fontScale: Float = 1f,
+
+    font: dev.spider.spider.domain.model.UiFont = dev.spider.spider.domain.model.UiFont.Auto,
+
+    uiScale: Float = 1f,
+    content: @Composable () -> Unit,
+) {
+    val system = if (dynamicColor) dynamicColorSchemeOrNull(darkTheme) else null
+    val spiderSeed = system?.primary ?: accentSeed(accentColor)
+    val spiderColors = remember(darkTheme, spiderSeed, amoledBlack) {
+        SpiderPalettes.of(dev.spider.spider.domain.model.SpiderPalette.Brand, darkTheme, spiderSeed, amoledBlack)
+    }
+    val scheme = if (design == AppDesign.Spider) {
+        remember(spiderColors) { spiderColorScheme(spiderColors) }
+    } else {
+        (system ?: rememberSpiderColorScheme(darkTheme, accentColor, colorStyle, colorContrast))
+            .let { if (amoledBlack) it.amoled(darkTheme) else it }
+    }
+    val spiderStyle = remember(spiderColors, spider, languageTag) { SpiderStyle(spiderColors, spider, latin = languageTag != "fa") }
+    val colorScheme = if (animateColors) {
+        animateColorScheme(scheme, animationSpec = { spring(stiffness = Spring.StiffnessMediumLow) })
+    } else {
+        scheme
+    }
+
+    val density = LocalDensity.current
+    val scale = dev.spider.spider.domain.model.UiScale.clamp(uiScale)
+    val scaled = remember(density, fontScale, scale) {
+        if (fontScale == 1f && scale == 1f) density else Density(density.density * scale, density.fontScale * fontScale)
+    }
+    MaterialExpressiveTheme(
+        colorScheme = colorScheme,
+        motionScheme = MotionScheme.expressive(),
+        shapes = SpiderShapes,
+        typography = typographyFor(languageTag, design, font),
+    ) {
+        CompositionLocalProvider(
+            LocalDensity provides scaled,
+            LocalAppDesign provides design,
+            LocalSpiderStyle provides spiderStyle,
+            content = content,
+        )
+    }
+}
+
+@Composable
+fun rememberSpiderColorScheme(
+    dark: Boolean,
+    accent: Int,
+    style: ColorStyle,
+    contrast: ColorContrast,
+): ColorScheme = remember(dark, accent, style, contrast) { zedColorScheme(dark, accent, style, contrast) }
+
+fun zedColorScheme(dark: Boolean, accent: Int, style: ColorStyle, contrast: ColorContrast): ColorScheme {
+    val seed = accentSeed(accent)
+    return if (style == ColorStyle.Spider) {
+        dynamicColorScheme(
+            seedColor = seed,
+            isDark = dark,
+            primary = seed,
+            secondary = BrandTeal,
+            tertiary = BrandRose,
+            style = PaletteStyle.TonalSpot,
+            contrastLevel = contrast.level,
+            specVersion = ColorSpec.SpecVersion.SPEC_2025,
+        )
+    } else {
+        dynamicColorScheme(
+            seedColor = seed,
+            isDark = dark,
+            style = style.palette,
+            contrastLevel = contrast.level,
+            specVersion = ColorSpec.SpecVersion.SPEC_2025,
+        )
+    }
+}
+
+fun accentSeed(index: Int): Color = AccentPresets.getOrNull(index)?.light ?: BrandIris
+
+val ColorStyle.palette: PaletteStyle
+    get() = when (this) {
+        ColorStyle.Spider, ColorStyle.TonalSpot -> PaletteStyle.TonalSpot
+        ColorStyle.Vibrant -> PaletteStyle.Vibrant
+        ColorStyle.Expressive -> PaletteStyle.Expressive
+        ColorStyle.Rainbow -> PaletteStyle.Rainbow
+        ColorStyle.FruitSalad -> PaletteStyle.FruitSalad
+        ColorStyle.Fidelity -> PaletteStyle.Fidelity
+        ColorStyle.Neutral -> PaletteStyle.Neutral
+        ColorStyle.Monochrome -> PaletteStyle.Monochrome
+    }
+
+val LocalAppDesign = staticCompositionLocalOf { AppDesign.Spider }
+
+@Composable
+expect fun dynamicColorSchemeOrNull(darkTheme: Boolean): ColorScheme?
