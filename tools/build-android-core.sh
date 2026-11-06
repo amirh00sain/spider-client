@@ -23,10 +23,25 @@ export GOBIN PATH="$GOBIN:$PATH" SPIDER_ROOT="$ROOT"
 go install golang.org/x/mobile/cmd/gomobile@v0.0.0-20260908204917-8b95e45f8d3e
 go install golang.org/x/mobile/cmd/gobind@v0.0.0-20260908204917-8b95e45f8d3e
 "$SOURCE/scripts/fetch.sh"
-NEWEST_NDK="$(find "${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V | tail -1)"
-if [ -n "$NEWEST_NDK" ]; then
-  sed -i -E "s#/ndk/[0-9]+\.[0-9]+\.[0-9]+#/ndk/$NEWEST_NDK#g" "$SOURCE/scripts/build-zedcore.sh"
+# Pick the NDK: prefer the one the workflow installed (NDK_HOME), else the newest.
+# cronet-go's libcronet.a needs a recent lld; NDK 27 fails with
+# "unknown relocation (315) against symbol typeinfo for ...".
+NDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}/ndk"
+if [ -n "${NDK_HOME:-}" ] && [ -d "$NDK_HOME/toolchains/llvm/prebuilt" ]; then
+  NEWEST_NDK="$(basename "$NDK_HOME")"
+else
+  NEWEST_NDK="$(find "$NDK_ROOT" -mindepth 1 -maxdepth 1 -type d -printf '%f\n' 2>/dev/null | sort -V | tail -1)"
 fi
+[ -n "$NEWEST_NDK" ] || { echo "No Android NDK found under $NDK_ROOT" >&2; exit 1; }
+if [ "${NEWEST_NDK%%.*}" -lt 28 ]; then
+  echo "NDK $NEWEST_NDK is too old (need >= 28) to link libcronet.a" >&2
+  exit 1
+fi
+export NDK_HOME="$NDK_ROOT/$NEWEST_NDK" ANDROID_NDK_HOME="$NDK_ROOT/$NEWEST_NDK" ANDROID_NDK_ROOT="$NDK_ROOT/$NEWEST_NDK"
+# Rewrite every hard-coded NDK version in the upstream scripts: both "/ndk/27.3.13750724"
+# and a bare "27.3.13750724" (e.g. NDK_VERSION=...), which the old sed missed.
+find "$SOURCE/scripts" -type f -name '*.sh' -exec sed -i -E \
+  "s#/ndk/[0-9]+\.[0-9]+\.[0-9]+#/ndk/$NEWEST_NDK#g; s#\b[0-9]{2}\.[0-9]+\.[0-9]{7,8}\b#$NEWEST_NDK#g" {} +
 (
   cd "$SOURCE/vendor/AndroidLibXrayLite"
   export GOTOOLCHAIN=go1.27.3
@@ -37,6 +52,10 @@ if ! grep -q 'github.com/armanlife/arman-vpn-client/core/mobile' "$SOURCE/script
   patch --directory="$SOURCE" -p1 < "$ROOT/tools/zedcore-arman.patch"
 fi
 grep -q 'github.com/armanlife/arman-vpn-client/core/mobile' "$SOURCE/scripts/build-zedcore.sh"
+if grep -rnE '\b[0-9]{2}\.[0-9]+\.[0-9]{7,8}\b' "$SOURCE/scripts" | grep -v "$NEWEST_NDK"; then
+  echo "Hard-coded old NDK version still present in builder scripts" >&2; exit 1
+fi
+echo ">>> building cores with NDK $NEWEST_NDK"
 "$SOURCE/scripts/build-zedcore.sh"
 test -s "$SOURCE/out/zedcore.aar"
 cp "$SOURCE/out/zedcore.aar" "$DEST"
